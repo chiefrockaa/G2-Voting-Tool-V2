@@ -7,23 +7,23 @@ from collections import defaultdict
 from io import BytesIO
 
 st.set_page_config(page_title="G2 Voting Tool", layout="centered")
-st.title("🔝 G2 Voting Tool V4 – mit Google Sheets Speicherung")
+st.title("🔝 G2 Voting Tool V4 – mit Google Sheets")
 
-# ✅ Sicherer Zugriff auf Service Account Secret – OHNE decode()
+# ✅ Sicheres Secret-Handling
 try:
     service_json = json.loads(st.secrets["gcp_service_account"])
 except json.JSONDecodeError as e:
-    st.error("❌ JSON konnte nicht geladen werden – wahrscheinlich wegen falschem Zeilenumbruch oder Escape-Fehler.")
+    st.error("❌ JSON konnte nicht geladen werden. Ist es korrekt als Zeichenkette mit \n gespeichert?")
     st.code(str(e))
     st.stop()
 
+# ✅ Google Sheets API-Verbindung
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(service_json, scope)
 client = gspread.authorize(creds)
 
 SHEET_NAME = "G2_Votings_DB"
 
-# Tabs = Votings
 tabs = client.open(SHEET_NAME).worksheets()
 tab_names = [t.title for t in tabs]
 
@@ -43,7 +43,6 @@ if voting_wahl == "Neues Voting erstellen":
 else:
     sheet = client.open(SHEET_NAME).worksheet(voting_wahl)
 
-# Verwaltung
 st.sidebar.subheader("🧹 Verwaltung")
 if st.sidebar.checkbox("⚠️ Ich will dieses Voting wirklich zurücksetzen"):
     if st.sidebar.button("Voting zurücksetzen (leeren)"):
@@ -51,7 +50,6 @@ if st.sidebar.checkbox("⚠️ Ich will dieses Voting wirklich zurücksetzen"):
         st.sidebar.success(f"Voting '{voting_wahl}' wurde geleert.")
         st.stop()
 
-# Eingabe
 st.header(f"📋 Voting: {voting_wahl}")
 name = st.text_input("Dein Name")
 spiele = [st.text_input(f"Platz {i+1} ({10 - i} Punkte)", key=i) for i in range(10)]
@@ -65,7 +63,6 @@ if st.button("Einreichen"):
         sheet.append_row([name] + spiele)
         st.success("✅ Stimme gespeichert!")
 
-# Ranking
 if st.checkbox("📊 Gesamtranking anzeigen"):
     rows = sheet.get_all_values()
     if len(rows) < 1:
@@ -97,7 +94,6 @@ if st.checkbox("📊 Gesamtranking anzeigen"):
         st.subheader("🏆 Gesamtranking")
         st.dataframe(ranking_df, use_container_width=True)
 
-        # Export
         st.markdown("### ⬇️ Ranking exportieren")
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
