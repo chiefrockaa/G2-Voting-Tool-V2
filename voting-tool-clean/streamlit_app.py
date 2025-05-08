@@ -1,51 +1,49 @@
 import streamlit as st
 import pandas as pd
 from collections import defaultdict
-import os
+from oauth2client.service_account import ServiceAccountCredentials
+import gspread
 from io import BytesIO
 
-st.title("🔝 Top-10 Voting Tool")
+st.title("🔝 G2 Voting Tool V4 – Google Sheets")
 
-DATA_DIR = "votings"
-os.makedirs(DATA_DIR, exist_ok=True)
+# Google Sheets Setup
+SHEET_NAME = "G2_Votings_DB"  # <-- ÄNDERN: Name deines Google Sheets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+client = gspread.authorize(creds)
 
-# Bestehende Votings
-bestehende_votings = [f.replace(".csv", "") for f in os.listdir(DATA_DIR) if f.endswith(".csv")]
+# Sheet-Voraussetzung: Ein Tab pro Voting
+tabs = client.open(SHEET_NAME).worksheets()
+tab_names = [t.title for t in tabs]
 
-# Auswahl oder neues Voting
+# Voting-Auswahl oder neues Voting
 st.sidebar.header("🗳️ Voting auswählen oder erstellen")
-voting_wahl = st.sidebar.selectbox("Wähle ein Voting", bestehende_votings + ["Neues Voting erstellen"])
+voting_wahl = st.sidebar.selectbox("Wähle ein Voting", tab_names + ["Neues Voting erstellen"])
 
-# Neues Voting erstellen
 if voting_wahl == "Neues Voting erstellen":
     neuer_voting_name = st.sidebar.text_input("Name für neues Voting")
     if st.sidebar.button("Erstellen"):
         if neuer_voting_name.strip():
-            new_path = os.path.join(DATA_DIR, f"{neuer_voting_name.strip()}.csv")
-            open(new_path, "a").close()
-            st.success(f"Voting '{neuer_voting_name}' wurde erstellt. Starte neu, um es auszuwählen.")
+            client.open(SHEET_NAME).add_worksheet(title=neuer_voting_name.strip(), rows="100", cols="12")
+            st.success(f"Voting '{neuer_voting_name}' wurde erstellt. Lade die Seite neu.")
             st.stop()
         else:
             st.sidebar.warning("Bitte gib einen Namen ein.")
     st.stop()
 else:
-    voting_name = voting_wahl
-    csv_path = os.path.join(DATA_DIR, f"{voting_name}.csv")
+    sheet = client.open(SHEET_NAME).worksheet(voting_wahl)
 
-# Verwaltung: zurücksetzen oder löschen
+# Verwaltung: Zurücksetzen
 st.sidebar.subheader("🧹 Verwaltung")
-if st.sidebar.button("Voting zurücksetzen (leeren)"):
-    open(csv_path, "w").close()
-    st.sidebar.success(f"Inhalte von '{voting_name}' wurden gelöscht.")
-    st.stop()
-
-if st.sidebar.button("Voting komplett löschen"):
-    os.remove(csv_path)
-    st.sidebar.success(f"Voting '{voting_name}' wurde gelöscht. Starte neu.")
-    st.stop()
+if st.sidebar.checkbox("⚠️ Ich will dieses Voting wirklich zurücksetzen"):
+    if st.sidebar.button("Voting zurücksetzen (leeren)"):
+        sheet.clear()
+        st.sidebar.success(f"Voting '{voting_wahl}' wurde geleert.")
+        st.stop()
 
 # Eingabeformular
-st.header(f"📋 Voting: {voting_name}")
+st.header(f"📋 Voting: {voting_wahl}")
 name = st.text_input("Dein Name")
 spiele = [st.text_input(f"Platz {i+1} ({10 - i} Punkte)", key=i) for i in range(10)]
 
@@ -55,30 +53,30 @@ if st.button("Einreichen"):
     elif not any(spiele):
         st.warning("Bitte gib mindestens ein Spiel an.")
     else:
-        with open(csv_path, "a") as f:
-            f.write(name + "," + ",".join(spiele) + "\n")
+        sheet.append_row([name] + spiele)
         st.success("Danke! Deine Stimme wurde gespeichert.")
 
 # Gesamtranking anzeigen
 if st.checkbox("📊 Gesamtranking anzeigen"):
-    if not os.path.exists(csv_path) or os.stat(csv_path).st_size == 0:
+    rows = sheet.get_all_values()
+    if len(rows) < 1:
         st.info("Noch keine Daten vorhanden.")
     else:
-        df = pd.read_csv(csv_path, header=None)
+        df = pd.DataFrame(rows)
+        df.columns = [f"Platz {i}" if i > 0 else "Name" for i in range(len(df.columns))]
         spiele_punkte = defaultdict(int)
         spiele_quellen = defaultdict(list)
 
         for _, row in df.iterrows():
             voter = row[0]
             for i, spiel in enumerate(row[1:]):
-                if pd.notna(spiel) and spiel.strip():
+                if spiel.strip():
                     spiel_clean = spiel.strip()
                     punkte = 10 - i
                     spiele_punkte[spiel_clean] += punkte
                     spiele_quellen[spiel_clean].append(f"{voter} ({punkte} P)")
 
         ranking = sorted(spiele_punkte.items(), key=lambda x: x[1], reverse=True)
-
         ranking_df = pd.DataFrame([
             {
                 "Spiel": spiel,
@@ -87,13 +85,12 @@ if st.checkbox("📊 Gesamtranking anzeigen"):
             }
             for spiel, punkte in ranking
         ])
-
         st.subheader("🏆 Gesamtranking")
         st.dataframe(ranking_df, use_container_width=True)
 
-        # Exportfunktion
+        # Export
         st.markdown("### ⬇️ Ranking exportieren")
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             ranking_df.to_excel(writer, index=False, sheet_name="Gesamtranking")
-        st.download_button("📥 Excel herunterladen", data=output.getvalue(), file_name=f"{voting_name}_ranking.xlsx")
+        st.download_button("📥 Excel herunterladen", data=output.getvalue(), file_name=f"{voting_wahl}_ranking.xlsx")
