@@ -9,30 +9,27 @@ from io import BytesIO
 st.set_page_config(page_title="G2 Voting Tool", layout="centered")
 st.title("🔝 G2 Voting Tool V4 – mit Google Sheets Speicherung")
 
-# ✅ Sicherer Zugriff auf Service Account Secret
-raw_key = st.secrets["gcp_service_account"]
-
-if isinstance(raw_key, str):
-    cleaned = raw_key.encode().decode("unicode_escape")
-    service_json = json.loads(cleaned)
-else:
-    service_json = raw_key
+# ✅ Sicherer Zugriff auf Service Account Secret – OHNE decode()
+try:
+    service_json = json.loads(st.secrets["gcp_service_account"])
+except json.JSONDecodeError as e:
+    st.error("❌ JSON konnte nicht geladen werden – wahrscheinlich wegen falschem Zeilenumbruch oder Escape-Fehler.")
+    st.code(str(e))
+    st.stop()
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(service_json, scope)
 client = gspread.authorize(creds)
 
-# 🔧 Name deines Google Sheets (vorher erstellen!)
 SHEET_NAME = "G2_Votings_DB"
 
-# Liste vorhandener Tabs (je Voting ein Tab)
+# Tabs = Votings
 tabs = client.open(SHEET_NAME).worksheets()
 tab_names = [t.title for t in tabs]
 
 st.sidebar.header("🗳️ Voting auswählen oder erstellen")
 voting_wahl = st.sidebar.selectbox("Wähle ein Voting", tab_names + ["Neues Voting erstellen"])
 
-# Neues Voting-Tab anlegen
 if voting_wahl == "Neues Voting erstellen":
     neuer_voting_name = st.sidebar.text_input("Name für neues Voting")
     if st.sidebar.button("Erstellen"):
@@ -68,7 +65,7 @@ if st.button("Einreichen"):
         sheet.append_row([name] + spiele)
         st.success("✅ Stimme gespeichert!")
 
-# Gesamtranking
+# Ranking
 if st.checkbox("📊 Gesamtranking anzeigen"):
     rows = sheet.get_all_values()
     if len(rows) < 1:
@@ -100,7 +97,7 @@ if st.checkbox("📊 Gesamtranking anzeigen"):
         st.subheader("🏆 Gesamtranking")
         st.dataframe(ranking_df, use_container_width=True)
 
-        # Excel-Export
+        # Export
         st.markdown("### ⬇️ Ranking exportieren")
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
